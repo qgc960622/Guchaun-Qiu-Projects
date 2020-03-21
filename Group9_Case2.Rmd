@@ -1,0 +1,253 @@
+---
+title: "Group9_Case2"
+author: Group 9: Tianbi Guo/ Huiwen Ge/ Anjali Shastri/ Guchuan Qiu/ Futao Xie
+date: "Spring 2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+################################
+########### SQL Code ###########
+################################
+
+```{sql}
+########### OUTPUT FOR SLIDE 4 ##########################
+########### Greek and Regular Flavor analysis ###########
+select Flavor1, sum(b.Units), (sum(b.Units)/(select sum(Units)
+                                             from itemsAttributes a 
+                                             join storeItemSales b
+                                             on a.`Item.Num` = b.`Item.Num`
+                                             where class = 'REGULAR'))*100 as percentUnit
+from itemsAttributes a 
+join storeItemSales b
+on a.`Item.Num` = b.`Item.Num`
+where class = 'REGULAR'
+group by Flavor1
+order by percentUnit desc;
+
+select Flavor1, sum(b.Units), (sum(b.Units)/(select sum(Units)
+                                             from itemsAttributes a 
+                                             join storeItemSales b
+                                             on a.`Item.Num` = b.`Item.Num`
+                                             where class = 'GREEK'))*100 as percentUnit 
+from itemsAttributes a 
+join storeItemSales b
+on a.`Item.Num` = b.`Item.Num`
+where class = 'GREEK'
+group by Flavor1
+order by percentUnit desc;
+
+select `Store.Num`, count(b.Units)
+from itemsAttributes a 
+join storeItemSales b
+on a.`Item.Num` = b.`Item.Num`
+where Flavor1 = 'strawban'
+group by `Store.Num`;
+
+```
+
+```{sql}
+########### OUTPUT FOR SLIDE 5 ###########
+########### attribute ####################
+
+select * from itemsAttributes;
+
+SELECT DISTINCT
+flavor1,
+SUM(zerofat),
+SUM(lowfat),
+SUM(highfat),
+SUM(organic),
+SUM(`all.natural`),
+SUM(probiotic),
+SUM(fiber)
+FROM
+itemsAttributes
+GROUP BY flavor1
+ORDER BY SUM(zerofat) DESC;
+########### Revenue ###########
+select Flavor1, sum(b.sales)
+from itemsAttributes a 
+join storeItemSales b
+on a.`Item.Num` = b.`Item.Num`
+group by Flavor1
+order by sum(b.sales) desc;
+########### hhld ###########
+select distinct(`User.ID`) 
+from survItemSales 
+where `User.ID` in 
+(select `User.ID` from itemsAttributes as a join survItemSales as b on a.`Item.Num` = b.`Item.Num`
+ where Class = "GREEK" and Brand = 'PVTLBL');
+
+select  distinct (`User.ID`), flavor1 , class, brand, sum(units), sum(sales)
+from itemsAttributes as a 
+join survItemSales as b 
+on a.`Item.Num` = b.`Item.Num`
+group by (`User.ID`), flavor1, class, brand;
+
+```
+
+##############################
+########### R Code ###########
+##############################
+
+```{r start}
+rm(list = ls())
+library(readr)
+library(ggplot2)
+res <- read_csv("survResponses.csv")
+```
+
+#######################
+#### Data Cleaning ####
+#######################
+
+```{r data cleaning}
+# 1. Delete the rows with all NAs in columns 15-37
+res[15:37][is.na(res[, 15:37])] <- 100
+res = res[which(rowSums(res[,15:37])!=2300),]
+res[15:37][res[, 15:37]==100] <- NA # 722 rows
+
+# 2. Delete the rows where answers to Q1 are NO
+res = res[which(res[,5]!=2),] # 722 rows
+
+# 3. Only consider those who preferred buying regular yogurt
+library(readxl)
+Greek_ID<- read_excel("Case 2/Book3.xlsx")
+GID = as.list(Greek_ID$`greek buyers`)
+res = res[!(res$ID %in% GID), ]
+
+write.csv(res, file = 'CleanSurveyData.csv')
+```
+
+##########################################
+########### OUTPUT FOR SLIDE 7 ###########
+########### Data Processing   ############
+##########################################
+
+```{r data processing}
+# Assign scores of 2 and 0 respectively to 'Regularly' and 'Occationally'
+
+flavordata = res[15:37]
+flavordata[1:23][flavordata[,1:23]==0] <- 4
+flavordata[1:23][flavordata[,1:23]==2] <- 0
+flavordata[1:23][is.na(flavordata[,1:23])] <- 0
+flavordata = round(flavordata/4,2) # assign 1 and 0.25 to regularly and occasionally
+names(flavordata)[1:23] = c('Almond','Banana','Black Cherry','Blueberry','Caramel','Chai','Chocolate'
+                       ,'Cinnamon','Coconut','Honey','Key Lime Pie','Lemon', 'Mango',
+                       'Maple','Pineapple','Plain','Pomegranate','Raspberry','Strawberry',
+                       'Strawberry Banana','Vanilla','Peach','Vanilla Banana')
+
+# Market Simulator
+
+simFCDecisions = function(scen,data){ 
+    inmkt = data[,scen, drop=FALSE] #construct the subsetted matrix of options
+    for (i in nrow(data)){
+        if (any(inmkt[i,] %in% 1) == TRUE & (inmkt[i,] %in% 0.25)<4){
+            a = inmkt[i,]
+            a[a[i,]== 0.25] <- 0 # given regularly buying choices, customer will not buy occational choices
+            inmkt[i,] <- a
+        }else if (any(inmkt[i,] %in% 1)== FALSE & (inmkt[i,] %in% 0.25)<4){
+            a = inmkt[i,]
+            a[a[i,]== 0.25] <- 0 # the exposure of occasional choices is not enough for the standard of a reach
+            inmkt[i,] <- a
+        }
+    }
+    return(inmkt)
+}
+
+# Calculate Reach
+measReach = function(data){
+    if(is.null(dim(data))){ #if data is a vector
+        ret = sum(data>0,na.rm=TRUE)/length(data)
+    } else if(ncol(data)==1){ #if data has only one column
+        ret = sum(data>0,na.rm=TRUE)/length(data)
+    }
+    else { #if data has multiple columns
+        ret = sum(apply(data>0,1,any),na.rm=TRUE)/nrow(data)
+    }
+    ret
+}
+
+# Calculate Frequency
+measFrequency = function(data){
+    ret = sum(data)
+    ret
+}
+
+
+evalNext = function(nextSet,set,data,measure=measReach){
+    vals = numeric(length(nextSet)) #set up storage for return value
+    for(k in 1:length(nextSet)){ #loop over the options in nextSet
+        if(length(set)==0){         #if no existing options
+            vals[k] = measure(simFCDecisions(nextSet[k],data)) 
+        } else {                    #if existing options
+            vals[k] = measure(simFCDecisions(c(set,nextSet[k]),data))
+        }
+    }
+    vals
+}
+
+evalFull = function(fullSet,data,origSet=numeric(0),measure=measReach){
+    curSet = origSet; #the current set of included options
+    remSet = fullSet[!(fullSet%in%origSet)]; #the remaining set of options to consider
+    K = length(remSet)
+    optVals = numeric(K); #create storage for the optimal values (optVals)
+    ordSet = numeric(K); #create storage for ordered set
+    for(i in 1:K){          #loop over the remaining set consider
+        tmpVals = evalNext(remSet,curSet,data,measure); #calculate vector of next evaluations
+        k = which.max(tmpVals) #pick the option that gives max measure, note will pick first case if a tie!
+        optVals[i] = tmpVals[k] #add optimal value
+        ordSet[i] = remSet[k]   #add index of option that creates optimal value
+        curSet = c(curSet,ordSet[i]); #add optimal next option to current set
+        remSet = remSet[-k];          #delete optimal next option from remaining set
+    }
+    #creaets a "TURF object" containing ordSet, optVals, origSet, origVal, measure, and pnames
+    turf = list(ordSet=ordSet,optVals=optVals,origSet=origSet,origVal=measure(simFCDecisions(origSet,data)),measure=measure,pnames=colnames(data))
+    class(turf)="TURF" #makes the list into a TURF object so that can call plot.TURF
+    turf  #return turf
+}
+
+#creates ggplot barplot for a turf object
+plot.TURF=function(turf,...){
+    if(class(turf)!="TURF"){
+        cat("Object not a turf.")
+    } else {
+        df = with(turf,data.frame(vals = c(origVal,optVals),titles=paste(0:length(ordSet),c("Original",pnames[ordSet]),sep=":")))
+        # with(turf,barplot(c(origVal,optVals),names.arg=c("Original",pnames[ordSet])))
+        dodge = position_dodge(width=.75); ##to form constant dimensions positioning for all geom's
+        gp = ggplot(df,aes(y=vals,x=titles,label=vals))
+        gp + geom_bar(position=dodge,stat="identity",col=1,fill=4,width=.75) + 
+            aes(reorder(titles, vals)) + 
+            xlab("Flavor Sets") + ylab("")
+    }
+}
+#########################################
+########### OUTPUT FOR SLIDE 7 ##########
+########### Analysis Results   ##########
+#########################################
+
+turf1 = evalFull(c(1:23),flavordata,c(4,10,15,17,20,22),measure = measReach)
+plot(turf1) #result for reach
+
+turf2 = evalFull(c(1:23),flavordata,c(4,10,15,17,20,22),measure = measFrequency)
+plot(turf2) # result for frequency
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
