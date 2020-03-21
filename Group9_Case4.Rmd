@@ -1,0 +1,148 @@
+---
+title: "Group9_Case4"
+author: "Group 9 - Huiwen Ge, Tianbi Guo, Guchuan Qiu, Anjali Shastri, Futao Xie"
+date: "2/16/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(data.table)
+library(ggplot2)
+library(grf)
+test <- read_csv("test_data_1904.csv")
+```
+
+#####Question1######
+
+```{r}
+dt = data.table(test)
+dagg = dt[,.(open = mean(open), click=mean(click), purch = mean(purch),seOpen = sd(open)/sqrt(.N), seClick=sd(click)/sqrt(.N), sePurch = sd(purch)/sqrt(.N),.N),by = .(group)]
+dagg
+
+dodge = position_dodge(width=1); ##to form constant dimensions
+ggplot(aes(x=group,y=purch,ymax=purch+sePurch,ymin=purch-sePurch),data=dagg)+
+  geom_bar(position=dodge,stat="identity",col=3:4,fill=7:8) + 
+  geom_errorbar(position=dodge)
+labs(x="Group",y="Purchases")
+
+
+summary(lm(purch~group,data=test)) #compares each email to control group
+
+# Baseline variable: days since last purchase
+hist(data$last_purch, 
+     xlab="Days Since Last Purchase", ylab="Customers", 
+     main="Histogram of Days Since Last Purchase")
+d$recentPurch = (d$last_purch < 60)
+
+
+summary(lm(purch~group+chard+sav_blanc+syrah+cab+last_purch+visits,data=test))
+```
+
+#####Question2######
+
+```{r}
+dt = data.table(test)
+dagg = dt[,.(open = mean(open), click=mean(click), purch = mean(purch),seOpen = sd(open)/sqrt(.N), seClick=sd(click)/sqrt(.N), sePurch = sd(purch)/sqrt(.N),.N),by = .(group)]
+dagg
+
+dodge = position_dodge(width=1); ##to form constant dimensions
+ggplot(aes(x=group,y=purch,ymax=purch+sePurch,ymin=purch-sePurch),data=dagg)+
+    geom_bar(position=dodge,stat="identity",col=2:3,fill=2:3) + 
+    geom_errorbar(position=dodge)
+labs(x="Group",y="Purchases")
+
+# emailed or not
+test$email = (test$group != "ctrl")
+names(test)
+summary(lm(purch~email,data=test))
+
+# 
+hist(test$last_purch, 
+     xlab="Days Since Last Purchase", ylab="Customers", 
+     main="Histogram of Days Since Last Purchase")
+test$recentPurch = (test$last_purch < 30)
+test$loyalBuyer = (test$past_purch > 130)
+test$syrah_or_not = (test$syrah >0)
+test$sav_blanc_or_not = (test$sav_blanc >0)
+test$chard_or_not = (test$chard >0)
+test$n_visit = (test$visits >5)
+dt = data.table(test)
+
+# Statistical Analysis
+dagg = dt[,.(open = mean(open), click=mean(click), purch = mean(purch),seOpen = sd(open)/sqrt(.N), seClick=sd(click)/sqrt(.N), sePurch = sd(purch)/sqrt(.N),.N),by = .(group,recentPurch)]
+dagg
+
+# Is email more effective for recent buyers? 
+dodge = position_dodge(width=1); ##to form constant dimensions
+ggplot(aes(fill=group,y=purch,x=recentPurch,ymax=purch+sePurch,ymin=purch-sePurch),data=dagg)+
+    geom_bar(position=dodge,stat="identity") + 
+    geom_errorbar(position=dodge)
+labs(x="Group",y="Purchases")
+
+# Measuring causal effects with regression: Conditional causal effects
+summary(lm(purch~email*recentPurch,data=test)) 
+
+summary(lm(purch~email*loyalBuyer,data=test)) 
+
+summary(lm(purch~email*loyalBuyer*recentPurch,data=test)) 
+
+summary(lm(purch~email*sav_blanc_or_not,data=test))
+
+summary(lm(purch~email*n_visit,data=test))
+```
+
+#####Question3######
+
+```{r}
+# Causal forest for wine retailer experiment
+test$email = (test$group != "ctrl")
+treat <- test$email
+response <- test$purch
+baseline <- test[, c("chard", "sav_blanc", "syrah", "cab", "past_purch","visits","last_purch")]
+cf <- causal_forest(baseline, response, treat)
+print(cf) ##visits, syrah have small effect
+
+# Overall average treatment effect
+average_treatment_effect(cf, method="AIPW")
+
+# Predicted uplift 
+prediction <- predict(cf, test[,c(7:13)], estimate.variance = TRUE)
+t = cbind(test,prediction[1]*0.3-0.1)
+t$score= 0
+t[t$predictions <= 0, 15] = FALSE
+t[t$predictions > 0, 15] = TRUE
+sum(t$score)/nrow(t)
+write.csv(t,"C:/Users/VE1/Downloads/score.csv")
+
+## Predicted uplift for all customers in test
+hist(predict(cf)$predictions, 
+     main="Histogram of Purchase Lift", 
+     xlab="Purchase Lift for Email", ylab="Customers")
+
+# Uplift versus past purchase amount
+trans_gray <- rgb(0.1, 0.1, 0.1, alpha=0.1)
+plot(test$past_purch, predict(cf)$predictions, 
+     cex=0.5, col=trans_gray,
+     xlab="Past Purchase Amount ($)", ylab="Predicted Treatment Effect ($)")
+
+# Uplift versus days since last purchase
+trans_gray <- rgb(0.1, 0.1, 0.1, alpha=0.1)
+plot(test$last_purch, predict(cf)$predictions, 
+     cex=0.5, col=trans_gray,
+     xlab="Days Since Last Purchase", ylab="Predicted Treatment Effect ($)")
+
+# Score and targeting decision when assume there's a new dataset 'newdata' where 7 to 13 columns are baseline variables
+# prediction <- predict(cf, newdata[,c(7:13)], estimate.variance = TRUE)
+# t = cbind(newdata,prediction[1]*0.3-0.1)
+# t$score= 0
+# t[t$predictions <= 0, 15] = FALSE 
+# t[t$predictions > 0, 15] = TRUE
+
+
+```
+
